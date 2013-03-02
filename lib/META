@@ -1,0 +1,11 @@
+# OASIS_START
+# DO NOT EDIT (digest: e973eba5babc8386a3f2567b20627670)
+version = "0.1"
+description = "A QuickCheck clone for OCaml"
+archive(byte) = "camlcheck.cma"
+archive(byte, plugin) = "camlcheck.cma"
+archive(native) = "camlcheck.cmxa"
+archive(native, plugin) = "camlcheck.cmxs"
+exists_if = "camlcheck.cma"
+# OASIS_STOP
+
