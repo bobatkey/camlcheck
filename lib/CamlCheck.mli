@@ -4,7 +4,7 @@ type property
 
 val forall : 'a arbitrary -> ('a -> property) -> property
 
-val check_property : property -> [ `Ok | `CounterExample of string list ]
+val check_property : property -> [ `OkAsFarAsIKnow | `CounterExample of (string * string) list ]
 
 val check : bool -> property
 
@@ -14,14 +14,17 @@ module Arbitrary : sig
   val unit : unit arbitrary
 
   val bool : bool arbitrary
+
   val int_range : int -> int -> int arbitrary
 
   val list : 'a arbitrary -> 'a list arbitrary
 
   val char : char arbitrary
+
   val printable_ascii_char : char arbitrary
 
   val string : string arbitrary
+
   val printable_ascii_string : string arbitrary
 
   val array : 'a arbitrary -> 'a array arbitrary

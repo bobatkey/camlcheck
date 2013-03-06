@@ -1,22 +1,26 @@
 type 'a arbitrary =
-    { generate  : (unit -> 'a)
-    ; to_string : ('a -> string)
+    { generate    : (unit -> 'a)
+    ; to_string   : ('a -> string)
+    ; description : string
+(*    ; shrink    : ('a -> 'a list)*)
     }
 
 type property = unit -> unit
 
-exception Counter_example of string list
+exception Counter_example of (string * string) list
 
 let forall domain predicate () =
   let value = domain.generate () in
   try predicate value ()
   with Counter_example l ->
-    raise (Counter_example (domain.to_string value::l))
+    let str  = domain.to_string value in
+    let desc = domain.description in
+    raise (Counter_example ((str,desc)::l))
 
 let check_property property =
   try
     for i = 1 to 1000 do property () done;
-    `Ok
+    `OkAsFarAsIKnow
   with Counter_example l ->
     `CounterExample l
 
@@ -29,13 +33,15 @@ module Arbitrary = struct
   let unit =
     let generate () = ()
     and to_string () = "()"
-    in {generate; to_string}
+    and description = "unit"
+    in {generate; to_string; description}
 
   let bool =
     let generate () = Random.bool ()
     and to_string = function true -> "true" | false -> "false"
+    and description = "bool"
     in
-    {generate; to_string}
+    {generate; to_string; description}
 
   let list a =
     let generate () =
@@ -45,21 +51,23 @@ module Arbitrary = struct
           | n -> loop (a.generate () :: acc) (n-1)
         in
         loop [] length
-    
     and to_string l =
       "[" ^ String.concat "," (List.map a.to_string l) ^ "]"
+    and description = a.description ^ " list"
     in
-    {generate; to_string}
+    {generate; to_string; description}
 
   let char =
     let generate () = Char.chr (Random.int 256)
-    and to_string c = "\"" ^ Char.escaped c ^ "\"" in
-    {generate; to_string}
+    and to_string c = "\"" ^ Char.escaped c ^ "\""
+    and description = "char" in
+    {generate; to_string; description}
 
   let printable_ascii_char =
     let generate () = Char.chr (Random.int (128 - 32) + 32)
-    and to_string c = "\"" ^ Char.escaped c ^ "\"" in
-    {generate; to_string}
+    and to_string c = "\"" ^ Char.escaped c ^ "\""
+    and description = "printable_ascii_char" in
+    {generate; to_string; description}
 
   let string =
     let generate () =
@@ -69,8 +77,9 @@ module Arbitrary = struct
         str.[i] <- char.generate ()
       done;
       str
-    and to_string s = "\"" ^ String.escaped s ^ "\"" in
-    {generate; to_string}
+    and to_string s = "\"" ^ String.escaped s ^ "\""
+    and description = "string" in
+    {generate; to_string; description}
 
   let printable_ascii_string =
     let generate () =
@@ -80,8 +89,9 @@ module Arbitrary = struct
         str.[i] <- printable_ascii_char.generate ()
       done;
       str
-    and to_string s = String.escaped s in
-    {generate; to_string}
+    and to_string s = String.escaped s
+    and description = "printable_ascii_string" in
+    {generate; to_string; description}
 
   let array a =
     let generate () =
@@ -97,8 +107,9 @@ module Arbitrary = struct
         arr;
       Buffer.add_string b "|]";
       Buffer.contents b
+    and description = a.description ^ " array"
     in
-    {generate; to_string}
+    {generate; to_string; description}
 
   let option a =
     let generate () =
@@ -106,14 +117,17 @@ module Arbitrary = struct
     and to_string = function
       | None -> "None"
       | Some v -> "Some (" ^ a.to_string v ^ ")"
+    and description = a.description ^ " option"
     in
-    {generate;to_string}
+    {generate;to_string;description}
 
   let int_range minimum maximum =
     let generate () =
       (* FIXME: overflow *)
       Random.int (maximum - minimum + 1) + minimum
     and to_string i = string_of_int i
+    and description =
+      Printf.sprintf "int_range(%d,%d)" minimum maximum
     in
-    {generate; to_string}
+    {generate; to_string; description}
 end
