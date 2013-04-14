@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: d7ad028b1e67cfacff2977ad62991620)
+# DO NOT EDIT (digest: 7f79065ecfab5cae26efd6eae31f3259)
 # Ignore VCS directories, you can use the same kind of rule outside 
 # OASIS_START/STOP if you want to exclude directories that contains 
 # useless stuff for the build process
@@ -15,4 +15,5 @@
 "_darcs": not_hygienic
 # Library camlcheck
 "lib/camlcheck.cmxs": use_camlcheck
+<lib/*.ml{,i}>: pkg_oUnit
 # OASIS_STOP

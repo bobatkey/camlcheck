@@ -10,3 +10,4 @@ BuildTools:  ocamlbuild
 Library "camlcheck"
   Path:    lib
   Modules: CamlCheck
+  BuildDepends: oUnit

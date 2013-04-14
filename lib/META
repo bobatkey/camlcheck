@@ -1,7 +1,8 @@
 # OASIS_START
-# DO NOT EDIT (digest: e973eba5babc8386a3f2567b20627670)
+# DO NOT EDIT (digest: 1f99aa476c7a4c1e858e100675c7e94c)
 version = "0.1"
 description = "A QuickCheck clone for OCaml"
+requires = "oUnit"
 archive(byte) = "camlcheck.cma"
 archive(byte, plugin) = "camlcheck.cma"
 archive(native) = "camlcheck.cmxa"
