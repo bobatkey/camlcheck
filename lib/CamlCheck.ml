@@ -72,20 +72,20 @@ end
 
 module Domain = struct
   type 'a t =
-      { generate    : 'a Generator.t
+      { generator    : 'a Generator.t
       ; to_string   : ('a -> string)
       ; description : string
       ; shrink    : ('a -> 'a list)
       }
 
-  let make ~generate ?shrink ~to_string ~description () =
+  let make ~generator ?shrink ~to_string ~description () =
     match shrink with
       | None ->
-        { generate; to_string; description; shrink = (fun _ -> []) }
+        { generator; to_string; description; shrink = (fun _ -> []) }
       | Some shrink ->
-        { generate; to_string; description; shrink }
+        { generator; to_string; description; shrink }
 
-  let generator a = a.generate
+  let generator a = a.generator
 
   let shrinker a = a.shrink
 
@@ -98,26 +98,26 @@ module PrimitiveDomains = struct
   open Domain
 
   let unit =
-    let generate = Generator.return ()
+    let generator = Generator.return ()
     and to_string () = "()"
     and description = "unit"
     and shrink () = []
-    in {generate; to_string; description; shrink}
+    in {generator; to_string; description; shrink}
 
   let bool =
-    let generate = Generator.bool
+    let generator = Generator.bool
     and to_string = function true -> "true" | false -> "false"
     and description = "bool"
     and shrink b = []
     in
-    {generate; to_string; description; shrink}
+    {generator; to_string; description; shrink}
 
   let list a =
-    let generate =
+    let generator =
       let open Generator in
       let rec loop acc = function
         | 0 -> return acc
-        | n -> a.generate >>= fun x -> loop (x::acc) (n-1)
+        | n -> a.generator >>= fun x -> loop (x::acc) (n-1)
       in int 20 >>= loop []
     and to_string l =
       "[" ^ String.concat "," (List.map a.to_string l) ^ "]"
@@ -132,37 +132,37 @@ module PrimitiveDomains = struct
       in
       gather [] [] l
     in
-    {generate; to_string; description;shrink}
+    {generator; to_string; description;shrink}
 
   let char =
-    let generate =
+    let generator =
       let open Generator in
       lift Char.chr (int 256)
     and to_string c = "\"" ^ Char.escaped c ^ "\""
     and description = "char"
     and shrink c = []
     in
-    {generate; to_string; description; shrink}
+    {generator; to_string; description; shrink}
 
   let printable_ascii_char =
-    let generate =
+    let generator =
       let open Generator in
       lift (fun x -> Char.chr (x+32)) (int (128-32))
     and to_string c = "\"" ^ Char.escaped c ^ "\""
     and description = "printable_ascii_char"
     and shrink c = []
     in
-    {generate; to_string; description; shrink}
+    {generator; to_string; description; shrink}
 
   let string =
-    let generate =
+    let generator =
       let open Generator in
       int 20 >>= fun length ->
       let str = String.create length in
       let rec loop i =
         if i = length then return str
         else begin
-          char.generate >>= fun c ->
+          char.generator >>= fun c ->
           str.[i] <- c;
           loop (i+1)
         end
@@ -181,17 +181,17 @@ module PrimitiveDomains = struct
       done;
       !ss
     in
-    {generate; to_string; description; shrink}
+    {generator; to_string; description; shrink}
 
   let printable_ascii_string =
-    let generate =
+    let generator =
       let open Generator in
       int 20 >>= fun length ->
       let str = String.create length in
       let rec loop i =
         if i = length then return str
         else begin
-          printable_ascii_char.generate >>= fun c ->
+          printable_ascii_char.generator >>= fun c ->
           str.[i] <- c;
           loop (i+1)
         end
@@ -210,13 +210,13 @@ module PrimitiveDomains = struct
       done;
       !ss
     in
-    {generate; to_string; description; shrink}
+    {generator; to_string; description; shrink}
 
   let array a =
-    let generate =
+    let generator =
       let open Generator in
       int 20 >>= fun length ->
-      Array.init length (fun _ -> a.generate)
+      Array.init length (fun _ -> a.generator)
     and to_string arr =
       let b = Buffer.create (Array.length arr * 10) in
       Buffer.add_string b "[|";
@@ -239,16 +239,16 @@ module PrimitiveDomains = struct
       done;
       !arrays
     in
-    {generate; to_string; description; shrink}
+    {generator; to_string; description; shrink}
 
   let option a =
-    let generate =
+    let generator =
       let open Generator in
       int 10 >>= fun c ->
       if c = 0 then
         return None
       else
-        (a.generate >>= fun x -> return (Some x))
+        (a.generator >>= fun x -> return (Some x))
     and to_string = function
       | None -> "None"
       | Some v -> "Some (" ^ a.to_string v ^ ")"
@@ -258,10 +258,10 @@ module PrimitiveDomains = struct
       | Some v ->
         None :: List.map (fun x -> Some x) (a.shrink v)
     in
-    {generate; to_string; description; shrink}
+    {generator; to_string; description; shrink}
 
   let int_range minimum maximum =
-    let generate =
+    let generator =
       (* FIXME: overflow *)
       let open Generator in
       int (maximum - minimum + 1) >>= fun x ->
@@ -272,12 +272,12 @@ module PrimitiveDomains = struct
     and shrink i =
       if i > minimum then [i-1] else []
     in
-    {generate; to_string; description; shrink}
+    {generator; to_string; description; shrink}
 
   let float_range minimum maximum =
     (* FIXME: this is wrong... *)
     Domain.make
-      ~generate:begin
+      ~generator:begin
         let open Generator in
         float (maximum -. minimum) >>= fun f -> return (f +. minimum)
       end
@@ -294,7 +294,7 @@ module Property = struct
       [ `Ok | `CounterExample of ((string * string) list * string) ]
 
   let forall domain predicate random_state =
-    let initial_value = Generator.run domain.generate random_state in
+    let initial_value = Generator.run domain.generator random_state in
     let saved_random_state = Random.State.copy random_state in
     let make_report value =
       (domain.to_string value,

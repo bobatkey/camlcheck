@@ -34,7 +34,7 @@ module Domain : sig
   type 'a t
 
   val make :
-    generate:('a Generator.t) ->
+    generator:('a Generator.t) ->
     ?shrink:('a -> 'a list) ->
     to_string:('a -> string) ->
     description:string ->
