@@ -13,6 +13,7 @@ module Generator : sig
 
   val return : 'a -> 'a t
   val bind   : 'a t -> ('a -> 'b t) -> 'b t
+  val (>>=)  : 'a t -> ('a -> 'b t) -> 'b t
 
   val lift : ('a -> 'b) -> 'a t -> 'b t
   val lift2 : ('a -> 'b -> 'c) -> 'a t -> 'b t -> 'c t
@@ -24,6 +25,8 @@ module Generator : sig
   val int64 : int64 -> int64 t
   val float : float -> float t
   val bool : bool t
+
+  val run : 'a t -> Random.State.t -> 'a
 end
 
 (** Domains of randomly generated test data. *)
@@ -50,28 +53,25 @@ module Property : sig
 
   val forall : 'a Domain.t -> ('a -> t) -> t
 
-  val check : bool -> t
+  val true_that : bool -> t
 
-  val check_equal : to_string:('a -> string) -> 'a -> 'a -> t
+  val equal : to_string:('a -> string) -> 'a -> 'a -> t
 
-  val check_raises : exn -> (unit -> 'a) -> t
+  val raises : exn -> (unit -> 'a) -> t
 
   (** Tests the given property 10000 times with random data for each
       universally quantified variable. If a counterexample is
       discovered, then an attempt to shrink it to produce a smaller
       refutation of the property. If no counterexample is found, then
       [`OkAsFarAsIKnow] is returned. *)
-  val test_property : t ->
+  val check : t ->
     [ `OkAsFarAsIKnow
     | `CounterExample of ((string * string) list * string) ]
 
   (** Turns a property into an OUnit test case. {!check_property} is
       invoked on the property. If a counterexample is discovered then the
       test fails. *)
-  val test_of_property : t -> unit -> unit
-
-  (** A useful combinator for writing properties. *)
-  val ( ^$ ) : ('a -> 'b) -> 'a -> 'b
+  val to_test : t -> unit -> unit
 end
 
 (** Domains for some standard types. *)

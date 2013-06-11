@@ -1,8 +1,36 @@
-module Generator = struct
+module Generator : sig
+  type 'a t
+
+  val return : 'a -> 'a t
+  val bind   : 'a t -> ('a -> 'b t) -> 'b t
+  val (>>=)  : 'a t -> ('a -> 'b t) -> 'b t
+
+  val lift : ('a -> 'b) -> 'a t -> 'b t
+  val lift2 : ('a -> 'b -> 'c) -> 'a t -> 'b t -> 'c t
+
+  val bits : int t
+  val int : int -> int t
+  val int32 : int32 -> int32 t
+  val nativeint : nativeint -> nativeint t
+  val int64 : int64 -> int64 t
+  val float : float -> float t
+  val bool : bool t
+
+  module Array : sig
+    val init : int -> (int -> 'a t) -> 'a array t
+  end
+
+  val run : 'a t -> Random.State.t -> 'a
+end = struct
   type 'a t = Random.State.t -> 'a
+
+  let run generator random_state =
+    generator random_state
 
   let return a random_state = a
   let bind c f random_state =
+    f (c random_state) random_state
+  let (>>=) c f random_state =
     f (c random_state) random_state
 
   let lift2 f g1 g2 =
@@ -35,6 +63,11 @@ module Generator = struct
 
   let bool random_state =
     Random.State.bool random_state
+
+  module Array = struct
+    let init length f random_state =
+      Array.init length (fun i -> f i random_state)
+  end
 end
 
 module Domain = struct
@@ -65,14 +98,14 @@ module PrimitiveDomains = struct
   open Domain
 
   let unit =
-    let generate random_state = ()
+    let generate = Generator.return ()
     and to_string () = "()"
     and description = "unit"
     and shrink () = []
     in {generate; to_string; description; shrink}
 
   let bool =
-    let generate random_state = Random.State.bool random_state
+    let generate = Generator.bool
     and to_string = function true -> "true" | false -> "false"
     and description = "bool"
     and shrink b = []
@@ -80,13 +113,12 @@ module PrimitiveDomains = struct
     {generate; to_string; description; shrink}
 
   let list a =
-    let generate random_state =
-        let length = Random.State.int random_state 20 in
-        let rec loop acc = function
-          | 0 -> acc
-          | n -> loop (a.generate random_state :: acc) (n-1)
-        in
-        loop [] length
+    let generate =
+      let open Generator in
+      let rec loop acc = function
+        | 0 -> return acc
+        | n -> a.generate >>= fun x -> loop (x::acc) (n-1)
+      in int 20 >>= loop []
     and to_string l =
       "[" ^ String.concat "," (List.map a.to_string l) ^ "]"
     and description = a.description ^ " list"
@@ -103,8 +135,9 @@ module PrimitiveDomains = struct
     {generate; to_string; description;shrink}
 
   let char =
-    let generate random_state =
-      Char.chr (Random.State.int random_state 256)
+    let generate =
+      let open Generator in
+      lift Char.chr (int 256)
     and to_string c = "\"" ^ Char.escaped c ^ "\""
     and description = "char"
     and shrink c = []
@@ -112,8 +145,9 @@ module PrimitiveDomains = struct
     {generate; to_string; description; shrink}
 
   let printable_ascii_char =
-    let generate random_state =
-      Char.chr (Random.State.int random_state (128 - 32) + 32)
+    let generate =
+      let open Generator in
+      lift (fun x -> Char.chr (x+32)) (int (128-32))
     and to_string c = "\"" ^ Char.escaped c ^ "\""
     and description = "printable_ascii_char"
     and shrink c = []
@@ -121,13 +155,19 @@ module PrimitiveDomains = struct
     {generate; to_string; description; shrink}
 
   let string =
-    let generate random_state =
-      let length = Random.State.int random_state 20 in
-      let str    = String.create length in
-      for i = 0 to length-1 do
-        str.[i] <- char.generate random_state
-      done;
-      str
+    let generate =
+      let open Generator in
+      int 20 >>= fun length ->
+      let str = String.create length in
+      let rec loop i =
+        if i = length then return str
+        else begin
+          char.generate >>= fun c ->
+          str.[i] <- c;
+          loop (i+1)
+        end
+      in
+      loop 0
     and to_string s = "\"" ^ String.escaped s ^ "\""
     and description = "string"
     and shrink s =
@@ -144,13 +184,19 @@ module PrimitiveDomains = struct
     {generate; to_string; description; shrink}
 
   let printable_ascii_string =
-    let generate random_state =
-      let length = Random.State.int random_state 20 in
-      let str    = String.create length in
-      for i = 0 to length-1 do
-        str.[i] <- printable_ascii_char.generate random_state
-      done;
-      str
+    let generate =
+      let open Generator in
+      int 20 >>= fun length ->
+      let str = String.create length in
+      let rec loop i =
+        if i = length then return str
+        else begin
+          printable_ascii_char.generate >>= fun c ->
+          str.[i] <- c;
+          loop (i+1)
+        end
+      in
+      loop 0
     and to_string s = String.escaped s
     and description = "printable_ascii_string"
     and shrink s =
@@ -167,9 +213,10 @@ module PrimitiveDomains = struct
     {generate; to_string; description; shrink}
 
   let array a =
-    let generate random_state =
-      let length = Random.State.int random_state 20 in
-      Array.init length (fun _ -> a.generate random_state)
+    let generate =
+      let open Generator in
+      int 20 >>= fun length ->
+      Array.init length (fun _ -> a.generate)
     and to_string arr =
       let b = Buffer.create (Array.length arr * 10) in
       Buffer.add_string b "[|";
@@ -195,11 +242,13 @@ module PrimitiveDomains = struct
     {generate; to_string; description; shrink}
 
   let option a =
-    let generate random_state =
-      if Random.State.int random_state 10 = 0 then
-        None
+    let generate =
+      let open Generator in
+      int 10 >>= fun c ->
+      if c = 0 then
+        return None
       else
-        Some (a.generate random_state)
+        (a.generate >>= fun x -> return (Some x))
     and to_string = function
       | None -> "None"
       | Some v -> "Some (" ^ a.to_string v ^ ")"
@@ -212,9 +261,11 @@ module PrimitiveDomains = struct
     {generate; to_string; description; shrink}
 
   let int_range minimum maximum =
-    let generate random_state =
+    let generate =
       (* FIXME: overflow *)
-      Random.State.int random_state (maximum - minimum + 1) + minimum
+      let open Generator in
+      int (maximum - minimum + 1) >>= fun x ->
+      return (x + minimum)
     and to_string i = string_of_int i
     and description =
       Printf.sprintf "int_range(%d,%d)" minimum maximum
@@ -224,9 +275,12 @@ module PrimitiveDomains = struct
     {generate; to_string; description; shrink}
 
   let float_range minimum maximum =
-  (* FIXME: this is wrong... *)
+    (* FIXME: this is wrong... *)
     Domain.make
-      ~generate:(Generator.bind (Generator.float (maximum -. minimum)) (fun f -> Generator.return (f +. minimum)))
+      ~generate:begin
+        let open Generator in
+        float (maximum -. minimum) >>= fun f -> return (f +. minimum)
+      end
       ~to_string:string_of_float
       ~description:(Printf.sprintf "float(%f,%f)" minimum maximum)
       ()
@@ -240,7 +294,7 @@ module Property = struct
       [ `Ok | `CounterExample of ((string * string) list * string) ]
 
   let forall domain predicate random_state =
-    let initial_value = domain.generate random_state in
+    let initial_value = Generator.run domain.generate random_state in
     let saved_random_state = Random.State.copy random_state in
     let make_report value =
       (domain.to_string value,
@@ -264,7 +318,7 @@ module Property = struct
       | `CounterExample report ->
         `CounterExample (try_to_shrink report initial_value)
 
-  let test_property property =
+  let check property =
     let random_state = Random.State.make_self_init () in
     let rec run i =
       if i = 0 then `OkAsFarAsIKnow
@@ -276,21 +330,25 @@ module Property = struct
     in
     run 10000
 
-  let check b _ =
+  let true_that b _ =
     if b then `Ok else `CounterExample ([], "")
 
-  let check_equal ~to_string x1 x2 _ =
+  let equal ~to_string x1 x2 _ =
     if x1 = x2 then
       `Ok
     else
       let message = "Not equal: " ^ to_string x1 ^ " and " ^ to_string x2 in
       `CounterExample ([], message)
 
-  let check_raises exn f =
-    check (try f (); false with exn' when exn = exn' -> true | _ -> false)
+  let raises exn f _ =
+    (* FIXME: better message *)
+    try f (); `CounterExample ([], "")
+    with
+      | exn' when exn = exn' -> `Ok
+      | _ -> `CounterExample ([], "")
 
-  let test_of_property property () =
-    match test_property property with
+  let to_test property () =
+    match check property with
       | `OkAsFarAsIKnow -> ()
       | `CounterExample (l, msg) ->
         let message =
@@ -299,6 +357,4 @@ module Property = struct
           ^ String.concat "\n" (List.map (fun (x,y) -> "(" ^ x ^ "," ^ y ^ ")") l)
         in
         OUnit.assert_failure message
-
-  let ( ^$ ) f x = f x
 end
