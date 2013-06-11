@@ -59,19 +59,23 @@ module Property : sig
 
   val raises : exn -> (unit -> 'a) -> t
 
+  val (==>) : bool -> t -> t
+
   (** Tests the given property 10000 times with random data for each
       universally quantified variable. If a counterexample is
       discovered, then an attempt to shrink it to produce a smaller
-      refutation of the property. If no counterexample is found, then
-      [`OkAsFarAsIKnow] is returned. *)
+      refutation of the property is made. If no counterexample is
+      found, then [`OkAsFarAsIKnow] is returned. *)
   val check : t ->
     [ `OkAsFarAsIKnow
-    | `CounterExample of ((string * string) list * string) ]
+    | `CounterExample of ((string * string) list * string)
+    | `GivenUp of int * int
+    ]
 
   (** Turns a property into an OUnit test case. {!check_property} is
       invoked on the property. If a counterexample is discovered then the
       test fails. *)
-  val to_test : t -> unit -> unit
+  val to_test : t -> OUnit.test_fun
 end
 
 (** Domains for some standard types. *)

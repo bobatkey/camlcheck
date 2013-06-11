@@ -291,22 +291,29 @@ module Property = struct
 
   type t =
       Random.State.t ->
-      [ `Ok | `CounterExample of ((string * string) list * string) ]
+      [ `Ok
+      | `CounterExample of ((string * string) list * string)
+      | `PreconditionFailed
+      ]
 
   let forall domain predicate random_state =
     let initial_value = Generator.run domain.generator random_state in
     let saved_random_state = Random.State.copy random_state in
     let make_report value =
-      (domain.to_string value,
-       domain.description)
+      domain.to_string value,
+      domain.description
     in
     let rec try_shrinkings = function
-      | [] -> None
+      | [] ->
+        None
       | value::values ->
         let random_state = Random.State.copy saved_random_state in
         match predicate value random_state with
-          | `Ok               -> try_shrinkings values
-          | `CounterExample l -> Some (try_to_shrink l value)
+          | `PreconditionFailed
+          | `Ok ->
+            try_shrinkings values
+          | `CounterExample report ->
+            Some (try_to_shrink report value)
     and try_to_shrink (l,msg) value =
       match try_shrinkings (domain.shrink value) with
         | None        -> (make_report value::l, msg)
@@ -317,21 +324,32 @@ module Property = struct
         `Ok
       | `CounterExample report ->
         `CounterExample (try_to_shrink report initial_value)
+      | `PreconditionFailed ->
+        `PreconditionFailed
 
   let check property =
     let random_state = Random.State.make_self_init () in
-    let rec run i =
-      if i = 0 then `OkAsFarAsIKnow
+    let rec run counter successful =
+      if counter = 10_000 then
+        if successful < 7_500 then
+          `GivenUp (counter, successful)
+        else
+          `OkAsFarAsIKnow
       else match property random_state with
         | `Ok ->
-          run (i-1)
+          run (counter+1) (successful+1)
+        | `PreconditionFailed ->
+          run (counter+1) successful
         | `CounterExample report ->
           `CounterExample report
     in
-    run 10000
+    run 0 0
 
   let true_that b _ =
-    if b then `Ok else `CounterExample ([], "")
+    if b then
+      `Ok
+    else
+      `CounterExample ([], "falsified")
 
   let equal ~to_string x1 x2 _ =
     if x1 = x2 then
@@ -339,6 +357,12 @@ module Property = struct
     else
       let message = "Not equal: " ^ to_string x1 ^ " and " ^ to_string x2 in
       `CounterExample ([], message)
+
+  let (==>) b property random_state =
+    if b then
+      property random_state
+    else
+      `PreconditionFailed
 
   let raises exn f _ =
     (* FIXME: better message *)
@@ -357,4 +381,6 @@ module Property = struct
           ^ String.concat "\n" (List.map (fun (x,y) -> "(" ^ x ^ "," ^ y ^ ")") l)
         in
         OUnit.assert_failure message
+      | `GivenUp _ ->
+        OUnit.assert_failure "too many failed preconditions"
 end
