@@ -2,7 +2,6 @@ module Generator : sig
   type 'a t
 
   val return : 'a -> 'a t
-  val bind   : 'a t -> ('a -> 'b t) -> 'b t
   val (>>=)  : 'a t -> ('a -> 'b t) -> 'b t
 
   val lift : ('a -> 'b) -> 'a t -> 'b t
@@ -28,20 +27,16 @@ end = struct
     generator random_state
 
   let return a random_state = a
-  let bind c f random_state =
-    f (c random_state) random_state
   let (>>=) c f random_state =
     f (c random_state) random_state
 
   let lift2 f g1 g2 =
-    bind g1 begin fun x1 ->
-      bind g2 begin fun x2 ->
-        return (f x1 x2)
-      end
-    end
+    g1 >>= fun x1 ->
+    g2 >>= fun x2 ->
+    return (f x1 x2)
 
   let lift f g =
-    bind g begin fun x -> return (f x) end
+    g >>= fun x -> return (f x)
 
   let bits random_state =
     Random.State.bits random_state
