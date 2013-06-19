@@ -8,6 +8,14 @@ Plugins:     META (0.3)
 BuildTools:  ocamlbuild
 
 Library "camlcheck"
-  Path:    lib
-  Modules: CamlCheck
+  Path:         lib
+  Modules:      CamlCheck
   BuildDepends: oUnit
+
+Document "camlcheck"
+  Title:                Document for CamlCheck
+  Type:                 ocamlbuild (0.3)
+  BuildTools+:          ocamldoc
+  Install:              true
+  XOcamlbuildPath:      lib
+  XOcamlbuildLibraries: camlcheck
