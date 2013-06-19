@@ -14,7 +14,7 @@ module Generator : sig
   val (<$>)  : ('a -> 'b) -> 'a t -> 'b t
   val (<*>)  : ('a -> 'b) t -> 'a t -> 'b t
 
-
+  val fail : 'a t
   val bits : int t
   val int : int -> int t
   val int32 : int32 -> int32 t
@@ -24,7 +24,7 @@ module Generator : sig
   val bool : bool t
   val array : int -> (int -> 'a t) -> 'a array t
 
-  val run : 'a t -> Random.State.t -> 'a
+  val run : 'a t -> Random.State.t -> 'a option
 end
 
 (** Domains of randomly generated test data. *)
@@ -81,6 +81,8 @@ module Arbitrary : sig
   val array : 'a t -> 'a array t
 
   val option : 'a t -> 'a option t
+
+  val element_of : to_string:('a -> string) -> 'a list -> 'a t
 end
 
 (** Universally quantified properties for randomised testing. *)

@@ -6,6 +6,7 @@ module Generator : sig
   val (<$>)  : ('a -> 'b) -> 'a t -> 'b t
   val (<*>)  : ('a -> 'b) t -> 'a t -> 'b t
 
+  val fail : 'a t
   val bits : int t
   val int : int -> int t
   val int32 : int32 -> int32 t
@@ -15,44 +16,65 @@ module Generator : sig
   val bool : bool t
   val array : int -> (int -> 'a t) -> 'a array t
 
-  val run : 'a t -> Random.State.t -> 'a
+  val run : 'a t -> Random.State.t -> 'a option
 end = struct
-  type 'a t = Random.State.t -> 'a
+  type 'a t = Random.State.t -> 'a option
 
   let run generator random_state =
     generator random_state
 
-  let return a random_state = a
+  let fail random_state =
+    None
+
+  let return a random_state = Some a
   let (>>=) c f random_state =
-    f (c random_state) random_state
+    match c random_state with
+      | None   -> None
+      | Some a -> f a random_state
   let (<$>) f x random_state =
-    f (x random_state)
+    match x random_state with
+      | None -> None
+      | Some a -> Some (f a)
   let (<*>) f x random_state =
-    (f random_state) (x random_state)
+    match f random_state with
+      | None -> None
+      | Some f ->
+        match x random_state with
+          | None -> None
+          | Some a -> Some (f a)
 
   let bits random_state =
-    Random.State.bits random_state
+    Some (Random.State.bits random_state)
 
   let int bound random_state =
-    Random.State.int random_state bound
+    Some (Random.State.int random_state bound)
 
   let int32 bound random_state =
-    Random.State.int32 random_state bound
+    Some (Random.State.int32 random_state bound)
 
   let nativeint bound random_state =
-    Random.State.nativeint random_state bound
+    Some (Random.State.nativeint random_state bound)
 
   let int64 bound random_state =
-    Random.State.int64 random_state bound
+    Some (Random.State.int64 random_state bound)
 
   let float bound random_state =
-    Random.State.float random_state bound
+    Some (Random.State.float random_state bound)
 
   let bool random_state =
-    Random.State.bool random_state
+    Some (Random.State.bool random_state)
+
+  exception Fail
 
   let array length f random_state =
-    Array.init length (fun i -> f i random_state)
+    try
+      Some (Array.init length
+              (fun i ->
+                match f i random_state with
+                  | None -> raise Fail
+                  | Some x -> x))
+    with
+      | Fail -> None
 end
 
 module Arbitrary = struct
@@ -77,7 +99,6 @@ module Arbitrary = struct
   let to_description a = a.description
 
   let to_string a = a.to_string
-
 
   let unit =
     let generator = Generator.return ()
@@ -267,6 +288,21 @@ module Arbitrary = struct
       Printf.sprintf "float(%f,%f)" minimum maximum
     in
     make ~generator ~to_string ~description ()
+
+  let element_of ~to_string l =
+    let generator =
+      let open Generator in
+      return () >>= fun () ->
+      let len = List.length l in
+      if len = 0 then
+        fail
+      else
+        int len >>= fun i -> return (List.nth l i)
+    and description =
+      Printf.sprintf "element_of [%s]"
+        (String.concat ";" (List.map to_string l))
+    in
+    make ~generator ~to_string ~description ()
 end
 
 module Property = struct
@@ -302,13 +338,16 @@ module Property = struct
         | None        -> (make_report value::l, msg)
         | Some report -> report
     in
-    match predicate initial_value random_state with
-      | `Ok ->
-        `Ok
-      | `CounterExample report ->
-        `CounterExample (try_to_shrink report initial_value)
-      | `PreconditionFailed ->
-        `PreconditionFailed
+    match initial_value with
+      | None -> `Ok
+      | Some initial_value ->
+        match predicate initial_value random_state with
+          | `Ok ->
+            `Ok
+          | `CounterExample report ->
+            `CounterExample (try_to_shrink report initial_value)
+          | `PreconditionFailed ->
+            `PreconditionFailed
 
   let check property =
     let random_state = Random.State.make_self_init () in
