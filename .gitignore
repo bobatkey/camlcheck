@@ -2,3 +2,4 @@
 /setup.log
 /_build
 *~
+/camlcheck.docdir
