@@ -3,9 +3,8 @@ module Generator : sig
 
   val return : 'a -> 'a t
   val (>>=)  : 'a t -> ('a -> 'b t) -> 'b t
-
-  val lift : ('a -> 'b) -> 'a t -> 'b t
-  val lift2 : ('a -> 'b -> 'c) -> 'a t -> 'b t -> 'c t
+  val (<$>)  : ('a -> 'b) -> 'a t -> 'b t
+  val (<*>)  : ('a -> 'b) t -> 'a t -> 'b t
 
   val bits : int t
   val int : int -> int t
@@ -14,10 +13,7 @@ module Generator : sig
   val int64 : int64 -> int64 t
   val float : float -> float t
   val bool : bool t
-
-  module Array : sig
-    val init : int -> (int -> 'a t) -> 'a array t
-  end
+  val array : int -> (int -> 'a t) -> 'a array t
 
   val run : 'a t -> Random.State.t -> 'a
 end = struct
@@ -29,14 +25,10 @@ end = struct
   let return a random_state = a
   let (>>=) c f random_state =
     f (c random_state) random_state
-
-  let lift2 f g1 g2 =
-    g1 >>= fun x1 ->
-    g2 >>= fun x2 ->
-    return (f x1 x2)
-
-  let lift f g =
-    g >>= fun x -> return (f x)
+  let (<$>) f x random_state =
+    f (x random_state)
+  let (<*>) f x random_state =
+    (f random_state) (x random_state)
 
   let bits random_state =
     Random.State.bits random_state
@@ -59,18 +51,16 @@ end = struct
   let bool random_state =
     Random.State.bool random_state
 
-  module Array = struct
-    let init length f random_state =
-      Array.init length (fun i -> f i random_state)
-  end
+  let array length f random_state =
+    Array.init length (fun i -> f i random_state)
 end
 
-module Domain = struct
+module Arbitrary = struct
   type 'a t =
       { generator    : 'a Generator.t
-      ; to_string   : ('a -> string)
-      ; description : string
-      ; shrink    : ('a -> 'a list)
+      ; to_string    : ('a -> string)
+      ; description  : string
+      ; shrink       : ('a -> 'a list)
       }
 
   let make ~generator ?shrink ~to_string ~description () =
@@ -80,17 +70,14 @@ module Domain = struct
       | Some shrink ->
         { generator; to_string; description; shrink }
 
-  let generator a = a.generator
+  let to_generator a = a.generator
 
-  let shrinker a = a.shrink
+  let to_shrinker a = a.shrink
 
-  let description a = a.description
+  let to_description a = a.description
 
   let to_string a = a.to_string
-end
 
-module PrimitiveDomains = struct
-  open Domain
 
   let unit =
     let generator = Generator.return ()
@@ -132,7 +119,7 @@ module PrimitiveDomains = struct
   let char =
     let generator =
       let open Generator in
-      lift Char.chr (int 256)
+      Char.chr <$> int 256
     and to_string c = "\"" ^ Char.escaped c ^ "\""
     and description = "char"
     and shrink c = []
@@ -142,7 +129,7 @@ module PrimitiveDomains = struct
   let printable_ascii_char =
     let generator =
       let open Generator in
-      lift (fun x -> Char.chr (x+32)) (int (128-32))
+      (fun x -> Char.chr (x+32)) <$> int (128-32)
     and to_string c = "\"" ^ Char.escaped c ^ "\""
     and description = "printable_ascii_char"
     and shrink c = []
@@ -211,7 +198,7 @@ module PrimitiveDomains = struct
     let generator =
       let open Generator in
       int 20 >>= fun length ->
-      Array.init length (fun _ -> a.generator)
+      array length (fun _ -> a.generator)
     and to_string arr =
       let b = Buffer.create (Array.length arr * 10) in
       Buffer.add_string b "[|";
@@ -271,18 +258,19 @@ module PrimitiveDomains = struct
 
   let float_range minimum maximum =
     (* FIXME: this is wrong... *)
-    Domain.make
-      ~generator:begin
-        let open Generator in
-        float (maximum -. minimum) >>= fun f -> return (f +. minimum)
-      end
-      ~to_string:string_of_float
-      ~description:(Printf.sprintf "float(%f,%f)" minimum maximum)
-      ()
+    let generator =
+      let open Generator in
+      float (maximum -. minimum) >>= fun f ->
+      return (f +. minimum)
+    and to_string = string_of_float
+    and description =
+      Printf.sprintf "float(%f,%f)" minimum maximum
+    in
+    make ~generator ~to_string ~description ()
 end
 
 module Property = struct
-  open Domain
+  open Arbitrary
 
   type t =
       Random.State.t ->
@@ -346,10 +334,14 @@ module Property = struct
     else
       `CounterExample ([], "falsified")
 
-  let equal ~to_string x1 x2 _ =
-    if x1 = x2 then
+  let equal ~to_string ?cmp x1 x2 _ =
+    let x1_equals_x2 =
+      match cmp with None -> x1 = x2 | Some eq -> eq x1 x2
+    in
+    if x1_equals_x2 then
       `Ok
     else
+      (* FIXME: better message formatting *)
       let message = "Not equal: " ^ to_string x1 ^ " and " ^ to_string x2 in
       `CounterExample ([], message)
 
@@ -366,16 +358,17 @@ module Property = struct
       | exn' when exn = exn' -> `Ok
       | _ -> `CounterExample ([], "")
 
-  let to_test property () =
-    match check property with
-      | `OkAsFarAsIKnow -> ()
-      | `CounterExample (l, msg) ->
-        let message =
-          (* FIXME: better rendering of the result *)
-          "Counterexample: " ^ msg ^ "\n"
-          ^ String.concat "\n" (List.map (fun (x,y) -> "(" ^ x ^ "," ^ y ^ ")") l)
-        in
-        OUnit.assert_failure message
-      | `GivenUp _ ->
-        OUnit.assert_failure "too many failed preconditions"
+  let to_test property =
+    OUnit.TestCase (fun () ->
+      match check property with
+        | `OkAsFarAsIKnow -> ()
+        | `CounterExample (l, msg) ->
+          let message =
+            (* FIXME: better rendering of the result *)
+            "Counterexample: " ^ msg ^ "\n"
+            ^ String.concat "\n" (List.map (fun (x,y) -> "(" ^ x ^ "," ^ y ^ ")") l)
+          in
+          OUnit.assert_failure message
+        | `GivenUp _ ->
+          OUnit.assert_failure "too many failed preconditions")
 end
