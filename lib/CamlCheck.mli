@@ -24,7 +24,9 @@ module Generator : sig
   val bool : bool t
   val array : int -> (int -> 'a t) -> 'a array t
 
-  val run : 'a t -> Random.State.t -> 'a option
+  val get_size : int t
+
+  val run : 'a t -> Random.State.t -> int -> 'a option
 end
 
 (** Domains of randomly generated test data. *)
@@ -65,6 +67,9 @@ module Arbitrary : sig
 
   (** Domain of [int] values within a certain range. *)
   val int_range : int -> int -> int t
+
+  (** Domain of [int]s. *)
+  val int : int t
 
   (** Domain of [float] values within a certain range. *)
   val float_range : float -> float -> float t
@@ -128,12 +133,19 @@ module Property : sig
   (** Attach a precondition to a property. *)
   val (==>) : bool -> t -> t
 
+  (** Configuration parameters for randomised checking. *)
+  type configuration =
+      { num_trials               : int
+      ; max_failed_preconditions : int
+      ; size_parameter           : int
+      }
+
   (** Tests the given property 10000 times with random data for each
       universally quantified variable. If a counterexample is
       discovered, then an attempt to shrink it to produce a smaller
       refutation of the property is made. If no counterexample is
       found, then [`OkAsFarAsIKnow] is returned. *)
-  val check : t ->
+  val check : configuration -> t ->
     [ `OkAsFarAsIKnow
     | `CounterExample of ((string * string) list * string)
     | `GivenUp of int * int

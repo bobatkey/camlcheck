@@ -16,65 +16,69 @@ module Generator : sig
   val bool : bool t
   val array : int -> (int -> 'a t) -> 'a array t
 
-  val run : 'a t -> Random.State.t -> 'a option
+  val get_size : int t
+
+  val run : 'a t -> Random.State.t -> int -> 'a option
 end = struct
-  type 'a t = Random.State.t -> 'a option
+  type 'a t = Random.State.t -> int -> 'a option
 
-  let run generator random_state =
-    generator random_state
+  let run generator random_state size =
+    generator random_state size
 
-  let fail random_state =
+  let fail random_state _ =
     None
 
-  let return a random_state = Some a
-  let (>>=) c f random_state =
-    match c random_state with
+  let return a random_state _ = Some a
+  let (>>=) c f random_state size =
+    match c random_state size with
       | None   -> None
-      | Some a -> f a random_state
-  let (<$>) f x random_state =
-    match x random_state with
+      | Some a -> f a random_state size
+  let (<$>) f x random_state size =
+    match x random_state size with
       | None -> None
       | Some a -> Some (f a)
-  let (<*>) f x random_state =
-    match f random_state with
+  let (<*>) f x random_state size =
+    match f random_state size with
       | None -> None
       | Some f ->
-        match x random_state with
+        match x random_state size with
           | None -> None
           | Some a -> Some (f a)
 
-  let bits random_state =
+  let bits random_state _ =
     Some (Random.State.bits random_state)
 
-  let int bound random_state =
+  let int bound random_state _ =
     Some (Random.State.int random_state bound)
 
-  let int32 bound random_state =
+  let int32 bound random_state _ =
     Some (Random.State.int32 random_state bound)
 
-  let nativeint bound random_state =
+  let nativeint bound random_state _ =
     Some (Random.State.nativeint random_state bound)
 
-  let int64 bound random_state =
+  let int64 bound random_state _ =
     Some (Random.State.int64 random_state bound)
 
-  let float bound random_state =
+  let float bound random_state _ =
     Some (Random.State.float random_state bound)
 
-  let bool random_state =
+  let bool random_state _ =
     Some (Random.State.bool random_state)
 
   exception Fail
 
-  let array length f random_state =
+  let array length f random_state size =
     try
       Some (Array.init length
               (fun i ->
-                match f i random_state with
+                match f i random_state size with
                   | None -> raise Fail
                   | Some x -> x))
     with
       | Fail -> None
+
+  let get_size random_state size = Some size
 end
 
 module Arbitrary = struct
@@ -277,6 +281,21 @@ module Arbitrary = struct
     in
     {generator; to_string; description; shrink}
 
+  let int =
+    let generator =
+      let open Generator in
+      get_size >>= fun size ->
+      int (size * 2 + 1) >>= fun value ->
+      return (value - size)
+    and to_string i = string_of_int i
+    and description = "int"
+    and shrink i =
+      if i = 0 then []
+      else if i < 0 then [i+1]
+      else [i-1]
+    in
+    {generator; to_string; description; shrink}
+
   let float_range minimum maximum =
     (* FIXME: this is wrong... *)
     let generator =
@@ -310,13 +329,14 @@ module Property = struct
 
   type t =
       Random.State.t ->
+      int ->
       [ `Ok
       | `CounterExample of ((string * string) list * string)
       | `PreconditionFailed
       ]
 
-  let forall domain predicate random_state =
-    let initial_value = Generator.run domain.generator random_state in
+  let forall domain predicate random_state size =
+    let initial_value = Generator.run domain.generator random_state size in
     let saved_random_state = Random.State.copy random_state in
     let make_report value =
       domain.to_string value,
@@ -327,7 +347,7 @@ module Property = struct
         None
       | value::values ->
         let random_state = Random.State.copy saved_random_state in
-        match predicate value random_state with
+        match predicate value random_state size with
           | `PreconditionFailed
           | `Ok ->
             try_shrinkings values
@@ -341,7 +361,7 @@ module Property = struct
     match initial_value with
       | None -> `Ok
       | Some initial_value ->
-        match predicate initial_value random_state with
+        match predicate initial_value random_state size with
           | `Ok ->
             `Ok
           | `CounterExample report ->
@@ -349,31 +369,46 @@ module Property = struct
           | `PreconditionFailed ->
             `PreconditionFailed
 
-  let check property =
+  type configuration =
+      { num_trials               : int
+      ; max_failed_preconditions : int
+      ; size_parameter           : int
+      }
+
+  let default_configuration =
+    { num_trials               = 1000
+    ; max_failed_preconditions = 200
+    ; size_parameter           = 20
+    }
+
+  let check configuration property =
+    (* FIXME: use the size_parameter thing *)
+    let {num_trials;max_failed_preconditions;size_parameter} =
+      configuration
+    in
     let random_state = Random.State.make_self_init () in
-    let rec run counter successful =
-      if counter = 10_000 then
-        if successful < 7_500 then
-          `GivenUp (counter, successful)
-        else
-          `OkAsFarAsIKnow
-      else match property random_state with
+    let rec run counter pre_failed =
+      if pre_failed = max_failed_preconditions then
+        `GivenUp (counter, pre_failed)
+      else if counter = num_trials then
+        `OkAsFarAsIKnow
+      else match property random_state size_parameter with
         | `Ok ->
-          run (counter+1) (successful+1)
+          run (counter+1) pre_failed
         | `PreconditionFailed ->
-          run (counter+1) successful
+          run (counter+1) (pre_failed+1)
         | `CounterExample report ->
           `CounterExample report
     in
     run 0 0
 
-  let true_that b _ =
+  let true_that b _ _ =
     if b then
       `Ok
     else
       `CounterExample ([], "falsified")
 
-  let equal ~to_string ?cmp x1 x2 _ =
+  let equal ~to_string ?cmp x1 x2 _ _ =
     let x1_equals_x2 =
       match cmp with None -> x1 = x2 | Some eq -> eq x1 x2
     in
@@ -384,13 +419,13 @@ module Property = struct
       let message = "Not equal: " ^ to_string x1 ^ " and " ^ to_string x2 in
       `CounterExample ([], message)
 
-  let (==>) b property random_state =
+  let (==>) b property random_state size =
     if b then
-      property random_state
+      property random_state size
     else
       `PreconditionFailed
 
-  let raises exn f _ =
+  let raises exn f _ _ =
     (* FIXME: better message *)
     try f (); `CounterExample ([], "")
     with
@@ -399,7 +434,7 @@ module Property = struct
 
   let to_test property =
     OUnit.TestCase (fun () ->
-      match check property with
+      match check default_configuration property with
         | `OkAsFarAsIKnow -> ()
         | `CounterExample (l, msg) ->
           let message =
